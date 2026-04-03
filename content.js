@@ -6,11 +6,13 @@
 
 let isRunning  = false;
 let shouldStop = false;
+let sessionDownloadedHashes = new Set(); // Track downloads in current session only
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.action === 'START_RUN')  startRun(msg.data, 0, 0);
   if (msg.action === 'RESUME_RUN') resumeRun(msg.data);
   if (msg.action === 'STOP_RUN')   { shouldStop = true; isRunning = false; }
+  if (msg.action === 'CLEAR_DOWNLOADS') clearDownloadTracking();
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -25,6 +27,26 @@ async function resumeRun(data) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// DOWNLOAD TRACKING CLEANUP
+// ─────────────────────────────────────────────────────────────
+
+function clearDownloadTracking() {
+  // Clear only current session's tracking
+  sessionDownloadedHashes.clear();
+  log('Cleared session download tracking');
+}
+
+async function clearAllDownloadHistory() {
+  return new Promise(resolve => {
+    chrome.storage.local.set({ downloadedHashes: {} }, () => {
+      sessionDownloadedHashes.clear();
+      log('Cleared all download history');
+      resolve();
+    });
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
 // MAIN LOOP
 // ─────────────────────────────────────────────────────────────
 
@@ -32,6 +54,9 @@ async function startRun({ countries, prompts, prompt, delay, timeout }, fromCoun
   if (isRunning) return;
   isRunning  = true;
   shouldStop = false;
+
+  // Initialize session download tracking
+  sessionDownloadedHashes.clear();
 
   const promptList = prompts && prompts.length ? prompts : [prompt];
 
@@ -62,7 +87,7 @@ async function startRun({ countries, prompts, prompt, delay, timeout }, fromCoun
       }
 
       const rawPrompt   = promptList[p];
-      const finalPrompt = rawPrompt.replaceAll('{{COUNTRY_REGION}}', country);
+      const finalPrompt = rawPrompt.replaceAll('{{VARIABLE}}', country);
 
       notify('PROMPT_STARTED', { country, index: i, promptIndex: p });
       log(`  prompt ${p+1}/${promptList.length}`);
@@ -225,24 +250,116 @@ async function handleSessionLimit(countryIdx, promptIdx, countries, prompts, del
 }
 
 // ─────────────────────────────────────────────────────────────
+// DOWNLOAD TRACKING — prevent duplicate downloads
+// ─────────────────────────────────────────────────────────────
+
+async function getDownloadedHashes() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['downloadedHashes'], (d) => {
+      resolve(d.downloadedHashes || {});
+    });
+  });
+}
+
+async function saveDownloadHash(hash, metadata) {
+  const hashes = await getDownloadedHashes();
+  hashes[hash] = {
+    timestamp: Date.now(),
+    ...metadata
+  };
+  return new Promise(resolve => {
+    chrome.storage.local.set({ downloadedHashes: hashes }, resolve);
+  });
+}
+
+function generateContentHash(text) {
+  // Simple hash function - generate from response content
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    const char = text.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return 'hash_' + Math.abs(hash).toString(36);
+}
+
+function getResponseContent() {
+  // Extract the last visible AI response from the page
+  const responses = [...document.querySelectorAll('.font-claude-response')].filter((el) => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+
+  if (!responses.length) return null;
+
+  const lastResponse = responses[responses.length - 1];
+  return lastResponse.textContent || null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // DOWNLOAD BUTTON — click if present after response
 // ─────────────────────────────────────────────────────────────
 
 async function tryClickDownload() {
-  // Poll for download button for up to 10 seconds
-  const dlBtn = await poll(() => {
-    const btn = document.querySelector('button[aria-label="Download"]');
-    if (btn && isVisible(btn) && !btn.disabled) return btn;
+  // Get the current response content and hash it
+  const responseContent = getResponseContent();
+  if (!responseContent) {
+    log('No response content found — skipping download');
+    return;
+  }
+
+  const contentHash = generateContentHash(responseContent);
+
+  // Check if this content was already downloaded in current session
+  if (sessionDownloadedHashes.has(contentHash)) {
+    log(`Response already downloaded in this session (hash: ${contentHash}) — skipping`);
+    return;
+  }
+
+  // Also check persistent history for duplicates across sessions
+  const downloadedHashes = await getDownloadedHashes();
+  if (downloadedHashes[contentHash]) {
+    log(`Response matches previously downloaded content (hash: ${contentHash}) — skipping`);
+    sessionDownloadedHashes.add(contentHash);
+    return;
+  }
+
+  // Poll for download buttons for up to 10 seconds
+  const dlBtns = await poll(() => {
+    const btns = [...document.querySelectorAll('button[aria-label="Download"]')]
+      .filter(b => isVisible(b) && !b.disabled);
+    if (btns.length) return btns;
     return null;
   }, 10000, 500);
 
-  if (dlBtn) {
-    log('Download button found — clicking');
-    for (const t of ['mousedown', 'mouseup', 'click']) {
-      dlBtn.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+  if (dlBtns && dlBtns.length > 0) {
+    log(`Found ${dlBtns.length} download button(s) for new response — clicking all`);
+    let clickedCount = 0;
+
+    for (let i = 0; i < dlBtns.length; i++) {
+      const btn = dlBtns[i];
+      log(`  [${i+1}/${dlBtns.length}] Clicking download button`);
+      for (const t of ['mousedown', 'mouseup', 'click']) {
+        btn.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
+      }
+      clickedCount++;
+      // Delay between clicks to allow download to initiate
+      if (i < dlBtns.length - 1) {
+        await sleep(1500);
+      }
     }
-    await sleep(1500);
-    log('Download clicked');
+
+    // Only mark as downloaded if we actually clicked buttons
+    if (clickedCount > 0) {
+      sessionDownloadedHashes.add(contentHash);
+      await saveDownloadHash(contentHash, {
+        clickedCount,
+        buttonCount: dlBtns.length,
+        downloadedAt: new Date().toISOString()
+      });
+      await sleep(1500);
+      log(`Downloaded ${clickedCount}/${dlBtns.length} file(s) for response (hash: ${contentHash})`);
+    }
   } else {
     log('No download button found — skipping');
   }

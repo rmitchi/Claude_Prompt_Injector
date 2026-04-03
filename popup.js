@@ -29,11 +29,11 @@ function renderPromptFields(count, savedPrompts) {
     div.className = 'field';
     const required = i === 0;
     div.innerHTML = `
-      <label>Prompt ${i + 1}${required ? ' (requires {{COUNTRY_REGION}})' : ' ({{COUNTRY_REGION}} optional)'}</label>
+      <label>Prompt ${i + 1}${required ? ' (requires {{VARIABLE}})' : ' ({{VARIABLE}} optional)'}</label>
       <textarea class="prompt-input prompt-multi" id="promptInput_${i}" placeholder="${
         i === 0
-          ? 'Paste your main prompt here...\n\nUse {{COUNTRY_REGION}} as the placeholder.'
-          : `Follow-up prompt ${i + 1}...\n\n{{COUNTRY_REGION}} is optional here.`
+          ? 'Paste your main prompt here...\n\nUse {{VARIABLE}} as the placeholder.'
+          : `Follow-up prompt ${i + 1}...\n\n{{VARIABLE}} is optional here.`
       }"></textarea>
     `;
     container.appendChild(div);
@@ -65,10 +65,10 @@ function saveAllPrompts() {
 function updateStats() {
   const prompts = collectPrompts();
   const filled = prompts.filter(p => p.length > 0).length;
-  const has = prompts[0]?.includes('{{COUNTRY_REGION}}');
+  const has = prompts[0]?.includes('{{VARIABLE}}');
   const totalChars = prompts.reduce((s, p) => s + p.length, 0);
   $('#promptStats').textContent = `${filled}/${currentPromptCount} prompts filled · ${totalChars.toLocaleString()} chars${
-    has ? ' · placeholder ✓' : prompts[0]?.length ? ' · ⚠ prompt 1 missing {{COUNTRY_REGION}}' : ''
+    has ? ' · placeholder ✓' : prompts[0]?.length ? ' · ⚠ prompt 1 missing {{VARIABLE}}' : ''
   }`;
 }
 
@@ -146,6 +146,11 @@ $('#btnStop').addEventListener('click', stopRun);
 $('#btnResume').addEventListener('click', resumeRun);
 $('#btnReset').addEventListener('click', resetRun);
 
+// ── Clear download history ──
+if ($('#btnClearDownloads')) {
+  $('#btnClearDownloads').addEventListener('click', clearDownloadHistory);
+}
+
 function startRun() {
   const raw = $('#countriesInput').value.trim();
   if (!raw) return setStatus('Enter at least one region', 'error');
@@ -155,7 +160,7 @@ function startRun() {
     const filledPrompts = prompts.filter(p => p && p.trim().length > 0);
 
     if (!filledPrompts.length) return setStatus('No prompts saved', 'error');
-    if (!filledPrompts[0].includes('{{COUNTRY_REGION}}')) return setStatus('Prompt 1 missing {{COUNTRY_REGION}}', 'error');
+    if (!filledPrompts[0].includes('{{VARIABLE}}')) return setStatus('Prompt 1 missing {{VARIABLE}}', 'error');
 
     const countries = raw.split('\n').map(c => c.trim()).filter(Boolean);
     chrome.storage.local.set({ countries: raw });
@@ -244,6 +249,16 @@ function resetRun() {
   $('#limitBanner').style.display = 'none';
   resetUI();
   setStatus('Progress reset — ready to start fresh', 'idle');
+}
+
+function clearDownloadHistory() {
+  if (confirm('Clear all download history? This will allow re-downloading previously downloaded responses.')) {
+    chrome.storage.local.set({ downloadedHashes: {} }, () => {
+      sendMsg('CLEAR_DOWNLOADS', {}).catch(() => {});
+      setStatus('Download history cleared', 'idle');
+      flash();
+    });
+  }
 }
 
 // ── UI state helpers ──

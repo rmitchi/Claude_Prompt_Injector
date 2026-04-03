@@ -21,7 +21,7 @@ Claude on claude.ai can **natively generate Excel files** with full formatting â
 - Click the CR extension icon
 - Go to the **Prompt Template** tab
 - Paste your full V5 master prompt
-- **Important**: Replace the geography in Part G's "DEFAULT GEOGRAPHIC SCOPE" with `{{COUNTRY_REGION}}`
+- **Important**: Replace the geography in Part G's "DEFAULT GEOGRAPHIC SCOPE" with `{{VARIABLE}}`
   
   Instead of:
   ```
@@ -31,8 +31,8 @@ Claude on claude.ai can **natively generate Excel files** with full formatting â
   
   Use:
   ```
-  PRIMARY: {{COUNTRY_REGION}}
-  SUB-SCOPE: Major cities and business hubs within {{COUNTRY_REGION}}
+  PRIMARY: {{VARIABLE}}
+  SUB-SCOPE: Major cities and business hubs within {{VARIABLE}}
   ```
 
 - The prompt auto-saves, or click "Save Prompt"
@@ -68,7 +68,7 @@ Claude on claude.ai can **natively generate Excel files** with full formatting â
 ```
 For each country in the list:
   1. Take your saved prompt
-  2. Replace all {{COUNTRY_REGION}} with the current country
+  2. Replace all {{VARIABLE}} with the current country
   3. Inject the text into Claude's chat input
   4. Click the Send button
   5. Wait for Claude to finish generating (watches for stop button)

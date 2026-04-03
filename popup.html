@@ -248,8 +248,8 @@
   <!-- ═══ RUN PANEL ═══ -->
   <div class="panel active" id="panel-run">
     <div class="field">
-      <label>Countries / Regions (one per line)</label>
-      <textarea class="countries-input" id="countriesInput" placeholder="Gujarat, India&#10;Karnataka, India&#10;Maharashtra, India&#10;United Kingdom&#10;Dubai, UAE"></textarea>
+      <label>VARIABLE VALUES (one per line)</label>
+      <textarea class="countries-input" id="countriesInput" placeholder="Enter any values for the variable here..."></textarea>
     </div>
 
     <div id="limitBanner" class="limit-banner">
@@ -290,9 +290,9 @@
   <!-- ═══ SETTINGS PANEL ═══ -->
   <div class="panel" id="panel-settings">
     <div class="field">
-      <label>Number of prompts per country</label>
+      <label>Number of prompts per variable</label>
       <input type="number" class="delay-input" id="promptCountInput" value="1" min="1" max="20">
-      <div class="hint">How many sequential prompts to send for each country in the same chat. The Prompt Template tab will show this many text areas.</div>
+      <div class="hint">How many sequential prompts to send for each variable in the same chat. The Prompt Template tab will show this many text areas.</div>
     </div>
     <div class="field">
       <div class="field-row">
@@ -301,7 +301,7 @@
           <input type="number" class="delay-input" id="delayInput" value="5" min="5" max="300">
         </div>
       </div>
-      <div class="hint">Time to wait after Claude finishes before sending the next prompt/country. Helps avoid rate limits on Pro plan.</div>
+      <div class="hint">Time to wait after Claude finishes before sending the next prompt/variable. Helps avoid rate limits on Pro plan.</div>
     </div>
     <div class="field">
       <label>Response detection timeout (seconds)</label>
@@ -311,11 +311,17 @@
     <div class="btn-row">
       <button class="btn btn-secondary btn-small" id="btnSaveSettings">Save Settings</button>
     </div>
+
+    <div class="field" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+      <label>Download Tracking</label>
+      <div class="hint" style="margin-bottom: 10px;">The extension tracks downloaded responses to prevent re-downloading the same content in different sessions.</div>
+      <button class="btn btn-danger btn-small" id="btnClearDownloads" style="width: 100%; justify-content: center;">Clear Download History</button>
+    </div>
   </div>
 
   <!-- ═══ STATUS BAR ═══ -->
   <div class="status-bar" id="statusBar">
-    <div id="statusText" class="status-idle">Ready — paste countries and click Start</div>
+    <div id="statusText" class="status-idle">Ready — paste values and click Start</div>
     <div class="progress" id="progressSection" style="display:none;">
       <div class="progress-bar">
         <div class="progress-fill" id="progressFill" style="width:0%"></div>
