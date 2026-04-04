@@ -95,6 +95,9 @@ async function startRun({ countries, prompts, prompt, delay, timeout }, fromCoun
       // Save progress
       await saveProgress(i, p, 'running', countries, promptList, delay, timeout);
 
+      // 0. Mark all existing download buttons so we don't re-click them later
+      markExistingDownloadButtons();
+
       // 1. Find editor
       const editor = await poll(() => findEditor(), 15000);
       if (!editor) return fail('Editor not found. Are you on a claude.ai page?');
@@ -298,7 +301,52 @@ function getResponseContent() {
 
 // ─────────────────────────────────────────────────────────────
 // DOWNLOAD BUTTON — click if present after response
+// Scoped to LAST response only + marks clicked buttons
 // ─────────────────────────────────────────────────────────────
+
+function markExistingDownloadButtons() {
+  // Mark all currently visible download buttons so they are excluded
+  // when we later search for NEW download buttons after the next response
+  const existing = document.querySelectorAll('button[aria-label="Download"]:not([data-cpr-downloaded])');
+  let count = 0;
+  for (const btn of existing) {
+    if (isVisible(btn)) {
+      btn.setAttribute('data-cpr-downloaded', 'true');
+      count++;
+    }
+  }
+  if (count > 0) log(`Marked ${count} pre-existing download button(s)`);
+}
+
+function getLastResponseContainer() {
+  // Find all visible AI response elements
+  const responses = [...document.querySelectorAll('.font-claude-response')].filter(el => {
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+  if (!responses.length) return null;
+
+  const lastResponse = responses[responses.length - 1];
+
+  // Walk up to find the response's top-level message container
+  // Look for the nearest data-test-render-count ancestor or the
+  // parent group that wraps the entire message turn
+  let container = lastResponse;
+  for (let el = lastResponse; el && el !== document.body; el = el.parentElement) {
+    if (el.hasAttribute('data-test-render-count')) { container = el; break; }
+    // Also check for the group wrapper that holds the full response turn
+    if (el.classList.contains('group') && el.querySelector('.font-claude-response')) {
+      container = el;
+    }
+  }
+  return container;
+}
+
+function getDownloadButtonsInContainer(container) {
+  if (!container) return [];
+  return [...container.querySelectorAll('button[aria-label="Download"]')]
+    .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+}
 
 async function tryClickDownload() {
   // Get the current response content and hash it
@@ -324,24 +372,38 @@ async function tryClickDownload() {
     return;
   }
 
-  // Poll for download buttons for up to 10 seconds
+  // Find the last response container to scope our search
+  const lastContainer = getLastResponseContainer();
+
+  // Poll for download buttons scoped to the last response
   const dlBtns = await poll(() => {
-    const btns = [...document.querySelectorAll('button[aria-label="Download"]')]
-      .filter(b => isVisible(b) && !b.disabled);
-    if (btns.length) return btns;
+    // Primary: search only within the last response container
+    if (lastContainer) {
+      const scoped = getDownloadButtonsInContainer(lastContainer);
+      if (scoped.length) return scoped;
+    }
+    // Fallback: if no container found, search page but exclude already-clicked
+    const all = [...document.querySelectorAll('button[aria-label="Download"]')]
+      .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+    if (all.length) return all;
     return null;
   }, 10000, 500);
 
   if (dlBtns && dlBtns.length > 0) {
-    log(`Found ${dlBtns.length} download button(s) for new response — clicking all`);
+    log(`Found ${dlBtns.length} download button(s) in latest response — clicking`);
     let clickedCount = 0;
 
     for (let i = 0; i < dlBtns.length; i++) {
       const btn = dlBtns[i];
+      // Safety: skip if already marked (race condition guard)
+      if (btn.hasAttribute('data-cpr-downloaded')) continue;
+
       log(`  [${i+1}/${dlBtns.length}] Clicking download button`);
       for (const t of ['mousedown', 'mouseup', 'click']) {
         btn.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }));
       }
+      // Mark button as clicked so it won't be clicked again
+      btn.setAttribute('data-cpr-downloaded', 'true');
       clickedCount++;
       // Delay between clicks to allow download to initiate
       if (i < dlBtns.length - 1) {
@@ -361,7 +423,7 @@ async function tryClickDownload() {
       log(`Downloaded ${clickedCount}/${dlBtns.length} file(s) for response (hash: ${contentHash})`);
     }
   } else {
-    log('No download button found — skipping');
+    log('No download button found in latest response — skipping');
   }
 }
 
