@@ -175,7 +175,7 @@
     /* ── Limit timer ── */
     .limit-banner {
       display: none;
-      padding: 10px 18px;
+      padding: 10px 12px;
       background: rgba(210,153,34,0.1);
       border: 1px solid var(--orange);
       border-radius: 6px;
@@ -189,6 +189,19 @@
       font-weight: 600;
       margin-top: 4px;
     }
+    .limit-banner-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .limit-banner-left { flex: 1; }
+    .btn-try-now {
+      background: var(--orange); color: var(--bg);
+      padding: 6px 12px; border-radius: 5px;
+      font-size: 11px; font-weight: 700;
+      border: none; cursor: pointer; white-space: nowrap;
+      font-family: 'DM Sans', sans-serif;
+      transition: background 0.15s;
+    }
+    .btn-try-now:hover { background: #b8870a; }
 
     /* ── Country list in run panel ── */
     .country-queue {
@@ -253,8 +266,13 @@
     </div>
 
     <div id="limitBanner" class="limit-banner">
-      Session limit hit — auto-resume in:
-      <div class="timer" id="limitTimer">--:--:--</div>
+      <div class="limit-banner-row">
+        <div class="limit-banner-left">
+          Session limit hit — next check in:
+          <div class="timer" id="limitTimer">--:--</div>
+        </div>
+        <button class="btn-try-now" id="btnTryNow">▶ Try Now</button>
+      </div>
     </div>
 
     <div id="countryQueue" class="country-queue" style="display:none;"></div>
@@ -310,6 +328,12 @@
     </div>
     <div class="btn-row">
       <button class="btn btn-secondary btn-small" id="btnSaveSettings">Save Settings</button>
+    </div>
+
+    <div class="field">
+      <label>Session limit poll interval (minutes)</label>
+      <input type="number" class="delay-input" id="pollIntervalInput" value="30" min="5" max="120">
+      <div class="hint">How often to check if the session limit has reset. Default: 30 min. Lower = faster detection, higher = less tab activity.</div>
     </div>
 
     <div class="field" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">

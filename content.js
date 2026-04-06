@@ -8,11 +8,15 @@ let isRunning  = false;
 let shouldStop = false;
 let sessionDownloadedHashes = new Set(); // Track downloads in current session only
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.action === 'START_RUN')  startRun(msg.data, 0, 0);
   if (msg.action === 'RESUME_RUN') resumeRun(msg.data);
   if (msg.action === 'STOP_RUN')   { shouldStop = true; isRunning = false; }
   if (msg.action === 'CLEAR_DOWNLOADS') clearDownloadTracking();
+  if (msg.action === 'CHECK_LIMIT') {
+    sendResponse({ limitDetected: detectSessionLimit() });
+    return true;
+  }
 });
 
 // ─────────────────────────────────────────────────────────────
@@ -238,7 +242,7 @@ async function handleSessionLimit(countryIdx, promptIdx, countries, prompts, del
   // Save paused state
   await saveProgress(countryIdx, promptIdx, 'paused_limit', countries, prompts, delay, timeout);
 
-  // Tell background to set 5hr alarm
+  // Tell background to set poll alarm
   try {
     chrome.runtime.sendMessage({ action: 'SET_LIMIT_ALARM' }).catch(() => {});
   } catch (_) {}
@@ -249,7 +253,7 @@ async function handleSessionLimit(countryIdx, promptIdx, countries, prompts, del
     country: countries[countryIdx],
   });
 
-  log('Session limit — 5hr timer started. Will auto-resume.');
+  log('Session limit — polling started. Will auto-resume when limit clears.');
 }
 
 // ─────────────────────────────────────────────────────────────

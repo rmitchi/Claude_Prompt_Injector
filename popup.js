@@ -73,7 +73,7 @@ function updateStats() {
 }
 
 // ── Load saved state ──
-chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countries', 'runState', 'promptCount', 'limitResumeAt'], d => {
+chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countries', 'runState', 'promptCount', 'limitResumeAt', 'pollIntervalMin'], d => {
   const count = d.promptCount || 1;
   $('#promptCountInput').value = count;
 
@@ -84,9 +84,10 @@ chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countr
 
   renderPromptFields(count, savedPrompts || []);
 
-  if (d.delay)     $('#delayInput').value   = d.delay;
-  if (d.timeout)   $('#timeoutInput').value = d.timeout;
-  if (d.countries) $('#countriesInput').value = d.countries;
+  if (d.delay)           $('#delayInput').value        = d.delay;
+  if (d.timeout)         $('#timeoutInput').value      = d.timeout;
+  if (d.countries)       $('#countriesInput').value    = d.countries;
+  if (d.pollIntervalMin) $('#pollIntervalInput').value = d.pollIntervalMin;
 
   // Restore UI based on saved state
   if (d.runState) {
@@ -95,6 +96,8 @@ chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countr
       restoreRunningUI(st);
     } else if (st.status === 'paused_limit') {
       restorePausedLimitUI(st, d.limitResumeAt);
+    } else if (st.status === 'paused_no_tab') {
+      restorePausedNoTabUI(st);
     } else if (st.status === 'paused') {
       restorePausedUI(st);
     } else if (st.status === 'completed') {
@@ -130,9 +133,10 @@ $('#btnClearPrompt').addEventListener('click', () => {
 $('#btnSaveSettings').addEventListener('click', () => {
   const count = Math.max(1, Math.min(20, parseInt($('#promptCountInput').value) || 1));
   chrome.storage.local.set({
-    delay:       parseInt($('#delayInput').value)   || 5,
-    timeout:     parseInt($('#timeoutInput').value) || 600,
-    promptCount: count,
+    delay:          parseInt($('#delayInput').value)          || 5,
+    timeout:        parseInt($('#timeoutInput').value)        || 600,
+    pollIntervalMin: Math.max(5, Math.min(120, parseInt($('#pollIntervalInput').value) || 30)),
+    promptCount:    count,
   }, flash);
   if (count !== currentPromptCount) {
     const current = collectPrompts();
@@ -140,11 +144,12 @@ $('#btnSaveSettings').addEventListener('click', () => {
   }
 });
 
-// ── Run / Stop / Resume / Reset ──
+// ── Run / Stop / Resume / Reset / Try Now ──
 $('#btnStart').addEventListener('click', startRun);
 $('#btnStop').addEventListener('click', stopRun);
 $('#btnResume').addEventListener('click', resumeRun);
 $('#btnReset').addEventListener('click', resetRun);
+$('#btnTryNow').addEventListener('click', resumeRun);
 
 // ── Clear download history ──
 if ($('#btnClearDownloads')) {
@@ -296,6 +301,14 @@ function restorePausedUI(state) {
   setStatus(`Paused at: ${state.countries[state.currentIndex] || '…'} — prompt ${(state.currentPromptIndex || 0) + 1}`, 'paused');
 }
 
+function restorePausedNoTabUI(state) {
+  showPausedUI();
+  $('#progressSection').style.display = 'flex';
+  renderQueue(state);
+  renderProgress(state);
+  setStatus('Claude tab was closed during limit wait — open claude.ai then Resume', 'error');
+}
+
 function restorePausedLimitUI(state, limitResumeAt) {
   showPausedUI();
   $('#progressSection').style.display = 'flex';
@@ -365,14 +378,13 @@ function showLimitTimer(resumeAt) {
 function updateTimerDisplay(resumeAt) {
   const diff = resumeAt - Date.now();
   if (diff <= 0) {
-    $('#limitTimer').textContent = 'Resuming soon…';
+    $('#limitTimer').textContent = 'Checking…';
     clearTimerInterval();
     return;
   }
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
+  const m = Math.floor(diff / 60000);
   const s = Math.floor((diff % 60000) / 1000);
-  $('#limitTimer').textContent = `${h}h ${String(m).padStart(2,'0')}m ${String(s).padStart(2,'0')}s`;
+  $('#limitTimer').textContent = `${m}m ${String(s).padStart(2,'0')}s`;
 }
 
 function clearTimerInterval() {
@@ -481,6 +493,28 @@ chrome.runtime.onMessage.addListener((msg) => {
       }
     });
     showPausedUI();
-    setStatus(`Session limit hit at: ${msg.country} — 5hr timer started`, 'paused');
+    setStatus(`Session limit hit at: ${msg.country} — polling every 30 min`, 'paused');
+  }
+
+  if (msg.action === 'NO_TAB_FOR_POLL') {
+    clearTimerInterval();
+    $('#limitBanner').style.display = 'none';
+    showPausedUI();
+    setStatus('Claude tab was closed during limit wait — open claude.ai then Resume', 'error');
+  }
+
+  if (msg.action === 'POLL_STILL_LIMITED') {
+    // Update timer to next poll time
+    if (msg.nextAt) showLimitTimer(msg.nextAt);
+    chrome.storage.local.get(['runState'], d => {
+      const country = d.runState?.countries?.[d.runState?.currentIndex] || '…';
+      setStatus(`Still limited at: ${country} — next check scheduled`, 'paused');
+    });
+  }
+
+  if (msg.action === 'LIMIT_CLEARED_RESUMING') {
+    clearTimerInterval();
+    $('#limitBanner').style.display = 'none';
+    setStatus('Limit cleared — resuming…', 'running');
   }
 });
