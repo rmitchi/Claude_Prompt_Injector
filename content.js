@@ -140,7 +140,11 @@ async function startRun({ countries, prompts, prompt, delay, timeout }, fromCoun
       }
 
       // 6. Check for and click Download button
-      await tryClickDownload();
+      const dlResult = await tryClickDownload();
+      if (dlResult === 'not_found') {
+        const shouldStopRun = await handleNoDownloadButton(timeout, country, i, p);
+        if (shouldStopRun) break;
+      }
 
       // Small delay between prompts within the same country
       if (p < promptList.length - 1 && !shouldStop) {
@@ -311,7 +315,7 @@ function getResponseContent() {
 function markExistingDownloadButtons() {
   // Mark all currently visible download buttons so they are excluded
   // when we later search for NEW download buttons after the next response
-  const existing = document.querySelectorAll('button[aria-label="Download"]:not([data-cpr-downloaded])');
+  const existing = document.querySelectorAll('button[aria-label^="Download"]:not([data-cpr-downloaded])');
   let count = 0;
   for (const btn of existing) {
     if (isVisible(btn)) {
@@ -348,16 +352,17 @@ function getLastResponseContainer() {
 
 function getDownloadButtonsInContainer(container) {
   if (!container) return [];
-  return [...container.querySelectorAll('button[aria-label="Download"]')]
+  return [...container.querySelectorAll('button[aria-label^="Download"]')]
     .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
 }
 
+// Returns: 'found', 'skipped', or 'not_found'
 async function tryClickDownload() {
   // Get the current response content and hash it
   const responseContent = getResponseContent();
   if (!responseContent) {
     log('No response content found — skipping download');
-    return;
+    return 'not_found';
   }
 
   const contentHash = generateContentHash(responseContent);
@@ -365,7 +370,7 @@ async function tryClickDownload() {
   // Check if this content was already downloaded in current session
   if (sessionDownloadedHashes.has(contentHash)) {
     log(`Response already downloaded in this session (hash: ${contentHash}) — skipping`);
-    return;
+    return 'skipped';
   }
 
   // Also check persistent history for duplicates across sessions
@@ -373,24 +378,20 @@ async function tryClickDownload() {
   if (downloadedHashes[contentHash]) {
     log(`Response matches previously downloaded content (hash: ${contentHash}) — skipping`);
     sessionDownloadedHashes.add(contentHash);
-    return;
+    return 'skipped';
   }
 
   // Find the last response container to scope our search
   const lastContainer = getLastResponseContainer();
+  if (!lastContainer) {
+    log('No last response container found — skipping download');
+    return 'not_found';
+  }
 
-  // Poll for download buttons scoped to the last response
+  // Poll for download buttons strictly within the last response container only
   const dlBtns = await poll(() => {
-    // Primary: search only within the last response container
-    if (lastContainer) {
-      const scoped = getDownloadButtonsInContainer(lastContainer);
-      if (scoped.length) return scoped;
-    }
-    // Fallback: if no container found, search page but exclude already-clicked
-    const all = [...document.querySelectorAll('button[aria-label="Download"]')]
-      .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
-    if (all.length) return all;
-    return null;
+    const scoped = getDownloadButtonsInContainer(lastContainer);
+    return scoped.length ? scoped : null;
   }, 10000, 500);
 
   if (dlBtns && dlBtns.length > 0) {
@@ -426,9 +427,96 @@ async function tryClickDownload() {
       await sleep(1500);
       log(`Downloaded ${clickedCount}/${dlBtns.length} file(s) for response (hash: ${contentHash})`);
     }
+    return 'found';
   } else {
-    log('No download button found in latest response — skipping');
+    log('No download button found in latest response');
+    return 'not_found';
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// DOWNLOAD BEHAVIOR — settings + retry with default prompt
+// ─────────────────────────────────────────────────────────────
+
+async function getDownloadBehaviorSettings() {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['stopOnNoDownload', 'discordAlertNoDownload', 'defaultPrompt'], d => {
+      resolve({
+        stopOnNoDownload: !!d.stopOnNoDownload,
+        discordAlertNoDownload: !!d.discordAlertNoDownload,
+        defaultPrompt: d.defaultPrompt || '',
+      });
+    });
+  });
+}
+
+// Send default prompt, wait for response, retry download once.
+// Returns: 'found', 'not_found', or 'failed'
+async function retryWithDefaultPrompt(defaultPrompt, timeout, country) {
+  log('Sending default prompt as download retry…');
+
+  markExistingDownloadButtons();
+
+  const editor = await poll(() => findEditor(), 15000);
+  if (!editor) { log('Editor not found for default prompt'); return 'failed'; }
+
+  const injected = await inject(editor, defaultPrompt);
+  if (!injected) { log('Could not inject default prompt'); return 'failed'; }
+
+  const sent = await send(editor);
+  if (!sent) { log('Could not send default prompt'); return 'failed'; }
+
+  const waitResult = await waitDone(timeout, country);
+  if (waitResult === 'limit') {
+    log('Session limit hit during default prompt response');
+    return 'failed';
+  }
+
+  log('Default prompt response received — retrying download');
+  return await tryClickDownload();
+}
+
+// Handle missing download button: stop, retry with default prompt, or skip.
+// Returns true if the run should stop.
+async function handleNoDownloadButton(timeout, country, countryIndex, promptIndex) {
+  const settings = await getDownloadBehaviorSettings();
+
+  // Discord alert
+  if (settings.discordAlertNoDownload) {
+    notify('NO_DOWNLOAD_BUTTON', { country, index: countryIndex, promptIndex });
+  }
+
+  // Stop wins over default prompt
+  if (settings.stopOnNoDownload) {
+    log(`No download button — stopping run (stopOnNoDownload enabled)`);
+    notify('RUN_ERROR', { error: `No download button found for "${country}" (prompt ${promptIndex + 1}) — run stopped` });
+    shouldStop = true;
+    isRunning = false;
+    return true;
+  }
+
+  // Try default prompt if configured
+  if (settings.defaultPrompt) {
+    const retryResult = await retryWithDefaultPrompt(settings.defaultPrompt, timeout, country);
+
+    if (retryResult === 'found') {
+      log('Download succeeded after default prompt retry');
+      return false;
+    }
+
+    if (retryResult === 'failed') {
+      log('Default prompt retry failed — continuing to next');
+      return false;
+    }
+
+    // retryResult === 'not_found' — still no download after retry
+    log('Still no download button after default prompt — continuing');
+    return false;
+  }
+
+  // No settings configured — skip silently (original behavior)
+  log('No download button — skipping (no download behavior configured)');
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────

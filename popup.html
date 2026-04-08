@@ -80,7 +80,7 @@
       color: var(--text-dim); text-transform: uppercase;
       letter-spacing: 0.5px; margin-bottom: 6px;
     }
-    textarea, input[type="number"] {
+    textarea, input[type="number"], input[type="text"] {
       width: 100%; background: var(--surface);
       border: 1px solid var(--border); border-radius: 6px;
       color: var(--text); padding: 10px 12px;
@@ -326,14 +326,47 @@
       <input type="number" class="delay-input" id="timeoutInput" value="600" min="60" max="1800">
       <div class="hint">Max time to wait for Claude to finish responding. Default: 600s (10 min).</div>
     </div>
-    <div class="btn-row">
-      <button class="btn btn-secondary btn-small" id="btnSaveSettings">Save Settings</button>
-    </div>
-
     <div class="field">
       <label>Session limit poll interval (minutes)</label>
       <input type="number" class="delay-input" id="pollIntervalInput" value="30" min="5" max="120">
       <div class="hint">How often to check if the session limit has reset. Default: 30 min. Lower = faster detection, higher = less tab activity.</div>
+    </div>
+
+    <div class="field" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+      <label>Discord Notifications</label>
+      <input type="text" id="discordWebhookInput" placeholder="https://discord.com/api/webhooks/...">
+      <div class="hint">Paste your Discord webhook URL. You will be notified on errors, session limit hits, and when all runs complete.</div>
+      <div class="btn-row" style="margin-top: 8px;">
+        <button class="btn btn-secondary btn-small" id="btnSaveWebhook">Save Webhook</button>
+        <button class="btn btn-secondary btn-small" id="btnTestWebhook">Send Test</button>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+      <label>Download Behavior</label>
+
+      <div style="margin-bottom: 10px;">
+        <label style="display: inline-flex; align-items: center; gap: 6px; text-transform: none; cursor: pointer;">
+          <input type="checkbox" id="stopOnNoDownload"> Stop entire run if no download button found
+        </label>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <label style="display: inline-flex; align-items: center; gap: 6px; text-transform: none; cursor: pointer;">
+          <input type="checkbox" id="discordAlertNoDownload"> Send Discord alert when no download button found
+        </label>
+      </div>
+
+      <div id="defaultPromptGroup">
+        <label>Default prompt (sent when no download button found)</label>
+        <textarea class="prompt-input" id="defaultPromptInput" style="height: 80px;" placeholder="If kept empty no default will be sent"></textarea>
+        <div class="hint">When no download button is found in the latest response, this prompt is sent as a retry. Disabled when "Stop entire run" is enabled.</div>
+      </div>
+
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary btn-small" id="btnSaveSettings">Save Settings</button>
     </div>
 
     <div class="field" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">

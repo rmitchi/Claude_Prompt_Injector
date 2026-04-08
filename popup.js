@@ -73,7 +73,7 @@ function updateStats() {
 }
 
 // ── Load saved state ──
-chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countries', 'runState', 'promptCount', 'limitResumeAt', 'pollIntervalMin'], d => {
+chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countries', 'runState', 'promptCount', 'limitResumeAt', 'pollIntervalMin', 'discordWebhook', 'stopOnNoDownload', 'discordAlertNoDownload', 'defaultPrompt'], d => {
   const count = d.promptCount || 1;
   $('#promptCountInput').value = count;
 
@@ -87,7 +87,14 @@ chrome.storage.local.get(['prompts', 'masterPrompt', 'delay', 'timeout', 'countr
   if (d.delay)           $('#delayInput').value        = d.delay;
   if (d.timeout)         $('#timeoutInput').value      = d.timeout;
   if (d.countries)       $('#countriesInput').value    = d.countries;
-  if (d.pollIntervalMin) $('#pollIntervalInput').value = d.pollIntervalMin;
+  if (d.pollIntervalMin)  $('#pollIntervalInput').value  = d.pollIntervalMin;
+  if (d.discordWebhook)  $('#discordWebhookInput').value = d.discordWebhook;
+
+  // Download behavior settings
+  if (d.stopOnNoDownload)       $('#stopOnNoDownload').checked = true;
+  if (d.discordAlertNoDownload) $('#discordAlertNoDownload').checked = true;
+  if (d.defaultPrompt)          $('#defaultPromptInput').value = d.defaultPrompt;
+  toggleDefaultPromptField();
 
   // Restore UI based on saved state
   if (d.runState) {
@@ -132,12 +139,19 @@ $('#btnClearPrompt').addEventListener('click', () => {
 // ── Settings ──
 $('#btnSaveSettings').addEventListener('click', () => {
   const count = Math.max(1, Math.min(20, parseInt($('#promptCountInput').value) || 1));
+  const stopChecked = $('#stopOnNoDownload').checked;
   chrome.storage.local.set({
     delay:          parseInt($('#delayInput').value)          || 5,
     timeout:        parseInt($('#timeoutInput').value)        || 600,
     pollIntervalMin: Math.max(5, Math.min(120, parseInt($('#pollIntervalInput').value) || 30)),
     promptCount:    count,
-  }, flash);
+    stopOnNoDownload: stopChecked,
+    discordAlertNoDownload: $('#discordAlertNoDownload').checked,
+    defaultPrompt: stopChecked ? '' : $('#defaultPromptInput').value.trim(),
+  }, () => {
+    if (stopChecked) $('#defaultPromptInput').value = '';
+    flash();
+  });
   if (count !== currentPromptCount) {
     const current = collectPrompts();
     renderPromptFields(count, current);
@@ -155,6 +169,30 @@ $('#btnTryNow').addEventListener('click', resumeRun);
 if ($('#btnClearDownloads')) {
   $('#btnClearDownloads').addEventListener('click', clearDownloadHistory);
 }
+
+// ── Discord webhook ──
+$('#btnSaveWebhook').addEventListener('click', () => {
+  const url = $('#discordWebhookInput').value.trim();
+  chrome.storage.local.set({ discordWebhook: url }, flash);
+});
+
+$('#btnTestWebhook').addEventListener('click', () => {
+  const url = $('#discordWebhookInput').value.trim();
+  if (!url) return setStatus('Enter a webhook URL first', 'error');
+  chrome.runtime.sendMessage({ action: 'TEST_DISCORD', webhookUrl: url }, res => {
+    if (res?.ok) setStatus('Test message sent to Discord', 'done');
+    else         setStatus('Discord test failed — check the URL', 'error');
+  });
+});
+
+// ── Download behavior settings ──
+function toggleDefaultPromptField() {
+  const stopChecked = $('#stopOnNoDownload').checked;
+  $('#defaultPromptInput').disabled = stopChecked;
+  $('#defaultPromptGroup').style.opacity = stopChecked ? '0.4' : '1';
+}
+
+$('#stopOnNoDownload').addEventListener('change', toggleDefaultPromptField);
 
 function startRun() {
   const raw = $('#countriesInput').value.trim();

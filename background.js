@@ -5,6 +5,21 @@
 
 const POLL_ALARM = 'cpr-limit-poll';
 
+// ── Discord notification helper ──
+async function sendDiscordNotification(message) {
+  const { discordWebhook } = await chrome.storage.local.get(['discordWebhook']);
+  if (!discordWebhook) return;
+  try {
+    await fetch(discordWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: message }),
+    });
+  } catch (e) {
+    console.log('[CPR-BG] Discord notification failed:', e.message);
+  }
+}
+
 async function getPollMs() {
   const { pollIntervalMin } = await chrome.storage.local.get(['pollIntervalMin']);
   return (pollIntervalMin || 30) * 60 * 1000;
@@ -32,6 +47,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     runState.status  = 'paused_no_tab';
     runState.running = false;
     await chrome.storage.local.set({ runState });
+    sendDiscordNotification('[Claude Prompt Runner] Claude tab was closed during limit wait — manual resume needed.');
     try { chrome.runtime.sendMessage({ action: 'NO_TAB_FOR_POLL' }).catch(() => {}); } catch (_) {}
     return;
   }
@@ -108,6 +124,45 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     chrome.storage.local.set({ limitResumeAt: null });
     console.log('[CPR-BG] Poll alarm cleared');
     sendResponse({ ok: true });
+    return true;
+  }
+
+  if (msg.action === 'SESSION_LIMIT_HIT') {
+    sendDiscordNotification(`[Claude Prompt Runner] Session limit hit — paused at: ${msg.country}`);
+    return true;
+  }
+
+  if (msg.action === 'NO_DOWNLOAD_BUTTON') {
+    const promptInfo = msg.promptIndex != null ? ` (prompt ${msg.promptIndex + 1})` : '';
+    sendDiscordNotification(`[Claude Prompt Runner] No download button found for "${msg.country}"${promptInfo} — default prompt sent.`);
+    return true;
+  }
+
+  if (msg.action === 'RUN_ERROR') {
+    sendDiscordNotification(`[Claude Prompt Runner] Run stopped — Error: ${msg.error}`);
+    return true;
+  }
+
+  if (msg.action === 'ALL_DONE') {
+    sendDiscordNotification(`[Claude Prompt Runner] All done! ${msg.total} variable(s) completed successfully.`);
+    return true;
+  }
+
+  if (msg.action === 'TEST_DISCORD') {
+    (async () => {
+      const url = msg.webhookUrl;
+      try {
+        await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: '[Claude Prompt Runner] Test notification — webhook is working.' }),
+        });
+        sendResponse({ ok: true });
+      } catch (e) {
+        console.log('[CPR-BG] Discord test failed:', e.message);
+        sendResponse({ ok: false });
+      }
+    })();
     return true;
   }
 
