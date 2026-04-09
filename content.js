@@ -312,30 +312,30 @@ function getResponseContent() {
 // Scoped to LAST response only + marks clicked buttons
 // ─────────────────────────────────────────────────────────────
 
-function isDownloadButton(btn) {
-  if (!btn || btn.tagName !== 'BUTTON') return false;
-  const aria = btn.getAttribute('aria-label') || '';
-  if (aria.startsWith('Download')) return true;
-  // Match split-button variant in artifact preview pane (no aria-label, just text)
-  const txt = (btn.textContent || '').trim();
-  return txt === 'Download';
+function findAriaDownloadButtons(root) {
+  if (!root || !root.querySelectorAll) return [];
+  return [...root.querySelectorAll('button[aria-label^="Download"]')];
 }
 
-function findAllDownloadButtonsInRoot(root) {
+function findTextDownloadButtons(root) {
+  // Side-pane split button has no aria-label, just the text "Download".
+  // Exclude buttons that already match the aria-label form (avoid double-counting).
   if (!root || !root.querySelectorAll) return [];
-  const set = new Set();
-  for (const b of root.querySelectorAll('button[aria-label^="Download"]')) set.add(b);
+  const out = [];
   for (const b of root.querySelectorAll('button')) {
-    if ((b.textContent || '').trim() === 'Download') set.add(b);
+    if (b.hasAttribute('aria-label')) continue;
+    if ((b.textContent || '').trim() === 'Download') out.push(b);
   }
-  return [...set];
+  return out;
 }
 
 function markExistingDownloadButtons() {
   // Mark all currently visible download buttons so they are excluded
-  // when we later search for NEW download buttons after the next response
+  // when we later search for NEW download buttons after the next response.
+  // Mark BOTH variants so neither leaks through next time.
   let count = 0;
-  for (const btn of findAllDownloadButtonsInRoot(document)) {
+  const all = [...findAriaDownloadButtons(document), ...findTextDownloadButtons(document)];
+  for (const btn of all) {
     if (btn.hasAttribute('data-cpr-downloaded')) continue;
     if (isVisible(btn)) {
       btn.setAttribute('data-cpr-downloaded', 'true');
@@ -369,17 +369,24 @@ function getLastResponseContainer() {
   return container;
 }
 
+function pickClickable(btns) {
+  return btns.filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+}
+
 function getDownloadButtonsInContainer(container) {
   if (!container) return [];
-  return findAllDownloadButtonsInRoot(container)
-    .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+  // Prefer the inline aria-label download button (the canonical, one-per-artifact form).
+  const aria = pickClickable(findAriaDownloadButtons(container));
+  if (aria.length) return aria;
+  // Fall back to text-only side-pane split button.
+  return pickClickable(findTextDownloadButtons(container));
 }
 
 function getDownloadButtonsGlobal() {
   // Fallback: artifact preview pane lives outside the response container.
-  // Find any visible, unmarked Download button in the document.
-  return findAllDownloadButtonsInRoot(document)
-    .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+  const aria = pickClickable(findAriaDownloadButtons(document));
+  if (aria.length) return aria;
+  return pickClickable(findTextDownloadButtons(document));
 }
 
 // Returns: 'found', 'skipped', or 'not_found'
