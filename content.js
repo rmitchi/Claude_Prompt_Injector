@@ -312,12 +312,31 @@ function getResponseContent() {
 // Scoped to LAST response only + marks clicked buttons
 // ─────────────────────────────────────────────────────────────
 
+function isDownloadButton(btn) {
+  if (!btn || btn.tagName !== 'BUTTON') return false;
+  const aria = btn.getAttribute('aria-label') || '';
+  if (aria.startsWith('Download')) return true;
+  // Match split-button variant in artifact preview pane (no aria-label, just text)
+  const txt = (btn.textContent || '').trim();
+  return txt === 'Download';
+}
+
+function findAllDownloadButtonsInRoot(root) {
+  if (!root || !root.querySelectorAll) return [];
+  const set = new Set();
+  for (const b of root.querySelectorAll('button[aria-label^="Download"]')) set.add(b);
+  for (const b of root.querySelectorAll('button')) {
+    if ((b.textContent || '').trim() === 'Download') set.add(b);
+  }
+  return [...set];
+}
+
 function markExistingDownloadButtons() {
   // Mark all currently visible download buttons so they are excluded
   // when we later search for NEW download buttons after the next response
-  const existing = document.querySelectorAll('button[aria-label^="Download"]:not([data-cpr-downloaded])');
   let count = 0;
-  for (const btn of existing) {
+  for (const btn of findAllDownloadButtonsInRoot(document)) {
+    if (btn.hasAttribute('data-cpr-downloaded')) continue;
     if (isVisible(btn)) {
       btn.setAttribute('data-cpr-downloaded', 'true');
       count++;
@@ -352,7 +371,14 @@ function getLastResponseContainer() {
 
 function getDownloadButtonsInContainer(container) {
   if (!container) return [];
-  return [...container.querySelectorAll('button[aria-label^="Download"]')]
+  return findAllDownloadButtonsInRoot(container)
+    .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
+}
+
+function getDownloadButtonsGlobal() {
+  // Fallback: artifact preview pane lives outside the response container.
+  // Find any visible, unmarked Download button in the document.
+  return findAllDownloadButtonsInRoot(document)
     .filter(b => isVisible(b) && !b.disabled && !b.hasAttribute('data-cpr-downloaded'));
 }
 
@@ -388,10 +414,13 @@ async function tryClickDownload() {
     return 'not_found';
   }
 
-  // Poll for download buttons strictly within the last response container only
+  // Poll for download buttons in the last response container, then fall back
+  // to a document-wide search (the artifact preview pane lives outside it).
   const dlBtns = await poll(() => {
     const scoped = getDownloadButtonsInContainer(lastContainer);
-    return scoped.length ? scoped : null;
+    if (scoped.length) return scoped;
+    const global = getDownloadButtonsGlobal();
+    return global.length ? global : null;
   }, 10000, 500);
 
   if (dlBtns && dlBtns.length > 0) {
